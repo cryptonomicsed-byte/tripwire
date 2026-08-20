@@ -1,0 +1,19 @@
+routes:
+  hermes_api:
+    tiers: [0, 1, 3]
+    actions:
+      block: 0.95
+      flag: 0.75
+      throttle: 0.60
+  omniroute:
+    tiers: [0, 1, 3]
+    actions:
+      block: 0.95
+      flag: 0.70
+  vantage_workers:
+    tiers: [0, 1, 2, 3]
+    actions:
+      block: 0.90
+      flag: 0.60
+
+default_mode: flag
