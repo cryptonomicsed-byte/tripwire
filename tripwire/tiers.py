@@ -20,6 +20,16 @@ from collections import defaultdict
 
 T0_PATTERNS = [
     re.compile(r"ignore\s+(your|all)\s+(guidelines|instructions|rules|safety)", re.I),
+    # "ignore all previous instructions" — the canonical phrasing, which the
+    # line above misses because of the intervening qualifier. Measured: the old
+    # pattern scored 0.00 on it, so the guard was blind to its own textbook case.
+    re.compile(r"ignore\s+(?:all\s+|any\s+)?(?:the\s+|your\s+|my\s+)?(?:previous\s+|prior\s+|above\s+|earlier\s+|preceding\s+)?(?:instructions?|guidelines?|rules?|directives?|prompts?|safety)", re.I),
+    re.compile(r"disregard\s+(?:your|the|all|any)\s+(?:safety|polic(?:y|ies)|guidelines?|instructions?|rules?|training)", re.I),
+    re.compile(r"(?:reveal|print|show|repeat|dump|output|recite|leak)\s+(?:me\s+)?(?:the\s+)?(?:hidden\s+|secret\s+|full\s+|exact\s+|original\s+)?(?:system\s+(?:prompt|message|instructions?)|initial\s+(?:prompt|instructions?))\b(?!\s*(?:log|queue|handler|bus|store|table|id)\b)", re.I),
+    # Exfiltration verbs only: "list all api keys in the vault config" is
+    # inventory work, "export every api key" is not.
+    re.compile(r"(?:export|dump|reveal|leak)\s+(?:every|all)\s+(?:environment\s+variables?|env\s+vars?|api\s+keys?|secrets?|credentials?)", re.I),
+    re.compile(r"you\s+are\s+now\s+dan\b|\bdan\s+mode\b|\bdo\s+anything\s+now\b", re.I),
     re.compile(r"don'?t\s+refuse", re.I),
     re.compile(r"do\s+not\s+refuse", re.I),
     re.compile(r"no\s+(safety|guardrails|limits)", re.I),
@@ -32,11 +42,12 @@ T0_PATTERNS = [
 ]
 
 
-def tier0(raw: str, canonical: str) -> tuple[float, list[str]]:
-    """Pattern match over raw + canonical. Hit count -> 0..1 score."""
+def tier0(raw: str, canonical: str, *others: str) -> tuple[float, list[str]]:
+    """Pattern match over raw + canonical + any extra decode views. Hit count -> 0..1 score."""
     hits: list[str] = []
+    corpus = (raw, canonical) + tuple(others)
     for pat in T0_PATTERNS:
-        if pat.search(raw) or pat.search(canonical):
+        if any(pat.search(t) for t in corpus if t):
             hits.append(pat.pattern[:40])
     if not hits:
         return 0.0, []
@@ -214,7 +225,9 @@ class TierStack:
         result: dict = {"tiers": {}, "evidence": {}, "composite": 0.0}
 
         if 0 in active:
-            t0, ev0 = tier0(raw, canonical)
+            # Score patterns across every decode view, not just raw+canonical —
+            # otherwise rot13/spaced/leet views are computed and then ignored.
+            t0, ev0 = tier0(raw, canonical, *other_views)
             result["tiers"]["t0"] = t0
             result["evidence"]["t0"] = ev0
 

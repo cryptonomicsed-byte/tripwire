@@ -10,11 +10,19 @@ Views dict shape:
 from __future__ import annotations
 
 import base64
+import codecs
 import html
 import re
+import unicodedata
 import urllib.parse
 
 ZERO_WIDTH_RE = re.compile(r"[\u200b-\u200f\u2060-\u2064\ufeff]")
+
+# Letter-spacing: "i g n o r e" — a space between two single-character words.
+LETTER_SPACED_RE = re.compile(r"(?<=\b\w) (?=\w\b)")
+
+LEET_MAP = str.maketrans({"4": "a", "3": "e", "1": "i", "0": "o", "5": "s", "7": "t",
+                          "@": "a", "$": "s", "!": "i"})
 
 
 B64_TOKEN_RE = re.compile(r"[A-Za-z0-9+/]{16,}={0,2}")
@@ -72,6 +80,20 @@ DECODERS = [
     ("b64", _maybe_b64decode),
     ("unicode_escape", _unicode_escape_decode),
     ("zero_width", _strip_zero_width),
+    # NFKC folds fullwidth (ＡＢＣ -> ABC) and other compatibility forms. Safe to
+    # chain: it is idempotent and never turns readable text into gibberish.
+    ("nfkc", lambda s: unicodedata.normalize("NFKC", s)),
+]
+
+# Ambiguous "decoders": they produce a readable view for SOME inputs and
+# gibberish for the rest (rot13 of plain English is still English-looking).
+# Chaining them would corrupt every unrelated prompt, so they are emitted as
+# extra views and scanned, never fed back into the cascade.
+VIEW_DECODERS = [
+    ("rot13", lambda s: codecs.encode(s, "rot13")),
+    ("reversed", lambda s: s[::-1]),
+    ("leet", lambda s: s.translate(LEET_MAP)),
+    ("spaced", lambda s: LETTER_SPACED_RE.sub("", s)),
 ]
 
 
@@ -90,4 +112,11 @@ def normalize(text: str, max_passes: int = 4) -> dict:
             break
         cur = nxt
     views["canonical"] = cur
+    for name, fn in VIEW_DECODERS:
+        try:
+            cand = fn(cur)
+        except Exception:  # noqa: BLE001
+            continue
+        if cand != cur:
+            views[f"view_{name}"] = cand
     return views
